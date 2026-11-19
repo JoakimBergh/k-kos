@@ -1,0 +1,18 @@
+KoS-Kanonfode v0.4.3 — Installation
+
+1. Exit World of Warcraft completely.
+2. Back up `Interface/AddOns/KoS-Kanonfode/` and `WTF/Account/<account>/SavedVariables/KoS-Kanonfode.lua`.
+3. Replace the existing `Interface/AddOns/KoS-Kanonfode/` folder with the one in this ZIP. `KoS-Kanonfode.toc` must be directly inside the folder.
+4. Keep the legacy SavedVariables key `KillOnSightDB`; do not delete WTF or SavedVariables.
+5. Start WoW and enable `KoS-Kanonfode v0.4.3`.
+
+Release changes:
+- Updated the in-game AddOns list title and TOC version field to v0.4.3.
+- Startup confirmation now says only that KoS has loaded; it no longer suggests the removed `/kos show` command.
+- Removed the unused legacy slash-command help text from all locale files.
+- Rebranded all addon paths and display labels to the ASCII-only name `KoS-Kanonfode`.
+- The addon still registers no slash commands. Open the window from the minimap icon. Guild Sync now requires protocol v4 on all clients.
+
+The SavedVariables database key, Player KoS, Guild KoS, local statistics and Options are preserved.
+
+Sync compatibility: master and all members must use protocol v4. v3 clients will not receive official list changes. The SavedVariables key remains `KillOnSightDB`; no database reset is required.

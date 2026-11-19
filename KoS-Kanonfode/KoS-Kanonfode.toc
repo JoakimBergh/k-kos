@@ -1,0 +1,48 @@
+## Interface: 16001
+## Title: Kanonfode – Kill on Sight (K-KoS) v0.4.18
+## Notes: Kanonfode fork of Kill on Sight: Forever (WPvP focused)
+## Author: Milestorme
+## Version: 0.4.18
+## Category: Combat
+## IconTexture: Interface/AddOns/KoS-Kanonfode/icon.tga
+## SavedVariables: KillOnSightDB
+## OptionalDeps: LibSharedMedia-3.0
+## X-Localizations: enUS, deDE, frFR, esES, esMX, itIT, ptBR, ptPT, ruRU, koKR, zhCN, zhTW, jaJP, nlNL, daDK, plPL
+
+embeds.xml
+Modules\Version.lua
+
+Locale\enUS.lua
+Locale\deDE.lua
+Locale\frFR.lua
+Locale\esES.lua
+Locale\esMX.lua
+Locale\itIT.lua
+Locale\ptBR.lua
+Locale\ptPT.lua
+Locale\ruRU.lua
+Locale\koKR.lua
+Locale\zhCN.lua
+Locale\zhTW.lua
+Locale\jaJP.lua
+Locale\nlNL.lua
+Locale\daDK.lua
+Locale\plPL.lua
+
+Midnight_Init.lua
+
+Modules\Util.lua
+Modules\Master.lua
+Modules\Database.lua
+Modules\ClassDiscovery.lua
+Modules\Comm.lua
+Modules\Notifier.lua
+Modules\NearbyFrame.lua
+Modules\Detector.lua
+Modules\Activity.lua
+Modules\GUI.lua
+Modules\Minimap.lua
+Modules\Portrait.lua
+Modules\SpyImport.lua
+Modules\Midnight_Stats.lua
+Modules\Core.lua

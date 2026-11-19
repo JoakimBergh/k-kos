@@ -1,0 +1,239 @@
+-- KillOnSight: Midnight - Stats module (Retail BG/WPvP focused)
+--
+-- Owns all Stats-related state:
+--  * PvP outcomes (wins/losses) without relying on CLEU
+--  * Spy-style "encounter" counting (seen encounters) with timeouts
+--  * Reset safety (no resurrection)
+
+local Stats = {}
+
+local ENCOUNTER_TIMEOUT = 60 -- seconds since last touch to count as one encounter
+
+local encounterTicker
+local activeEncounters = {} -- [guid] = { name = "Name", nameLower = "name", lastTouchAt = epoch }
+local disabled = false
+
+local function IsDisabled()
+  local Core = _G.KillOnSight_Core
+  return disabled or (Core and Core.IsKoSActive and not Core:IsKoSActive()) or false
+end
+
+function Stats:SetDisabled(value)
+  disabled = value and true or false
+  if disabled then
+    -- Discard sessions without resolving them: BG entry must not increment Seen.
+    for guid in pairs(activeEncounters) do activeEncounters[guid] = nil end
+    local Detector = _G.KillOnSight_Detector
+    if Detector and Detector.ResetEngagementQueue then Detector:ResetEngagementQueue() end
+  end
+end
+
+local function IsPlayerGUID(guid)
+  return guid and guid:match('^Player%-') ~= nil
+end
+
+local function GetDB()
+  return _G.KillOnSight_DB
+end
+
+local function ScheduleGUIRefresh()
+  local Core = _G.KillOnSight_Core
+  if Core and Core._ScheduleGUIRefresh then
+    Core:_ScheduleGUIRefresh()
+  elseif Core and Core.ScheduleGUIRefresh then
+    Core:ScheduleGUIRefresh()
+  end
+end
+
+local function CleanName(n)
+  local util = _G.KillOnSight_Util
+  return util and util:NormalizePlayerName(n) or n
+end
+
+local function IsGroupOrSelfByName(name)
+  if not name or name == "" then return true end
+  local util = _G.KillOnSight_Util
+  local key = util and util:PlayerKey(name)
+  if not key then return false end
+  local function same(unit)
+    return util:PlayerKey(util:UnitPlayerName(unit)) == key
+  end
+  if same("player") then return true end
+  if IsInGroup and IsInGroup() then
+    if IsInRaid and IsInRaid() then
+      for i = 1, (GetNumGroupMembers and GetNumGroupMembers() or 0) do
+        if same("raid"..i) then return true end
+      end
+    else
+      for i = 1, 4 do if same("party"..i) then return true end end
+    end
+  end
+  return false
+end
+
+-- --------------------------------------------------
+-- Encounter tracking
+-- --------------------------------------------------
+
+function Stats:TouchEncounter(guid, name, classFile, guild)
+  if IsDisabled() then return end
+  if not guid or guid == "" then return end
+  if not IsPlayerGUID(guid) then return end
+
+  local cn = CleanName(name)
+  if not cn then return end
+  if IsGroupOrSelfByName(cn) then return end
+
+  local DB = GetDB()
+  if not DB then return end
+
+  -- Keep metadata fresh (do not increment seenCount here)
+  if DB.NoteEnemySeen then
+    local full = name or cn
+    DB:NoteEnemySeen(full, classFile, guild, guid)
+  end
+
+  local now = time()
+  local e = activeEncounters[guid]
+  if not e then
+    activeEncounters[guid] = { name = name, nameLower = cn:lower(), lastTouchAt = now }
+  else
+    if name and (not e.name or #name > #e.name) then e.name = name end
+    e.nameLower = e.nameLower or cn:lower()
+    e.lastTouchAt = now
+  end
+end
+
+function Stats:ResolveEncounter(guid)
+  if IsDisabled() then return end
+  if not guid or guid == "" then return end
+  local e = activeEncounters[guid]
+  if not e then return end
+
+  local DB = GetDB()
+  if DB and DB.StatsAddSeenEncounter then
+    DB:StatsAddSeenEncounter(e.name or e.nameLower or "")
+  end
+
+  activeEncounters[guid] = nil
+end
+
+local function StartEncounterTicker()
+  if encounterTicker then return end
+  if not C_Timer or not C_Timer.NewTicker then return end
+
+  encounterTicker = C_Timer.NewTicker(5, function()
+    if IsDisabled() then return end
+    local DB = GetDB()
+    if not DB then return end
+
+    local now = time()
+    for guid, e in pairs(activeEncounters) do
+      if e and e.lastTouchAt and (now - e.lastTouchAt) >= ENCOUNTER_TIMEOUT then
+        if DB.StatsAddSeenEncounter then
+          DB:StatsAddSeenEncounter(e.name or e.nameLower or "")
+        end
+        activeEncounters[guid] = nil
+      end
+    end
+  end)
+end
+
+function Stats:Init()
+  StartEncounterTicker()
+end
+
+-- --------------------------------------------------
+-- PvP outcomes (Retail best-effort)
+-- --------------------------------------------------
+
+-- Pull the most recent engaged enemy from the Detector queue.
+-- (Detector maintains this on Retail because we avoid CLEU.)
+local function PopMostRecentEngagement(maxAge)
+  local Detector = _G.KillOnSight_Detector
+  if Detector and Detector.PopMostRecentEngagement then
+    return Detector:PopMostRecentEngagement(maxAge)
+  end
+  return nil
+end
+
+local function PopEngagementForName(name)
+  local Detector = _G.KillOnSight_Detector
+  if Detector and Detector.PopEngagementForName then
+    return Detector:PopEngagementForName(name)
+  end
+  return nil
+end
+
+local function TouchOutcome(kind, nameHint, maxAge)
+  local DB = GetDB()
+  if not DB then return end
+
+  local name, classFile, guild, guid
+  if nameHint and nameHint ~= "" then
+    name, classFile, guild, guid = PopEngagementForName(nameHint)
+  else
+    name, classFile, guild, guid = PopMostRecentEngagement(maxAge)
+  end
+  if not name or name == "" then return end
+
+  -- Hard safety: never create stats records for non-player GUIDs.
+  if guid and guid ~= "" and not IsPlayerGUID(guid) then
+    return
+  end
+
+  -- Count this as an encounter session (one per outcome).
+  if guid and guid ~= "" then
+    Stats:TouchEncounter(guid, name, classFile, guild)
+  else
+    -- No GUID: still keep metadata fresh
+    if DB.NoteEnemySeen then
+      DB:NoteEnemySeen(name, classFile, guild, guid)
+    end
+  end
+
+  if kind == "win" then
+    if DB.StatsAddWin then DB:StatsAddWin(name) end
+  else
+    if DB.StatsAddLoss then DB:StatsAddLoss(name) end
+  end
+
+  -- Resolve (adds exactly one SeenEncounter) if we have a GUID, otherwise just add one.
+  if guid and guid ~= "" then
+    Stats:ResolveEncounter(guid)
+  else
+    if DB.StatsAddSeenEncounter then DB:StatsAddSeenEncounter(name) end
+  end
+
+  if DB._BumpStatsRevision then DB:_BumpStatsRevision() end
+  ScheduleGUIRefresh()
+end
+
+function Stats:OnEvent(event, ...)
+  if IsDisabled() then return end
+  if event == "PLAYER_PVP_KILLS_CHANGED" then
+    TouchOutcome("win")
+    return
+  end
+
+  if event == "PLAYER_DEAD" then
+    TouchOutcome("loss", nil, 60)
+    return
+  end
+end
+
+-- Called by GUI Reset Stats accept handler.
+function Stats:OnResetStats()
+  -- Clear any detector queues so no stale engagement can repopulate stats.
+  local Detector = _G.KillOnSight_Detector
+  if Detector and Detector.ResetEngagementQueue then
+    Detector:ResetEngagementQueue()
+  end
+  -- Also clear encounter sessions.
+  for k in pairs(activeEncounters) do
+    activeEncounters[k] = nil
+  end
+end
+
+_G.KillOnSight_MidnightStats = Stats
+return Stats
