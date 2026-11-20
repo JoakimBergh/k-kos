@@ -1,3 +1,23 @@
+## Kanonfode – Kill on Sight (K-KoS) v0.4.20 — Target alert reset
+
+### Fixed
+- Close the Spy-style target alert when the same hostile player's GUID is observed no longer targeting the player.
+- Clear the target alert on player death and add an X button for manual dismissal.
+- Preserve the existing alert scan, targeting behavior, database, SavedVariables, and Guild Sync data.
+- No live in-game test was performed by the build agent.
+
+## Kanonfode – Kill on Sight (K-KoS) v0.4.19 — Personal P-Hits
+
+### Added
+- Add an account-local P-Hits list that every member can manage from its own tab or the Nearby right-click menu.
+- Mark personal targets with `(P)` in Nearby and other enemy-name views, and send them through the standard KoS alert behavior.
+- Keep P-Hits outside the official database tables, revisions, digest and Guild Sync payloads.
+
+### Preserved
+- Guild Sync continues to exchange the official Player KoS and Guild KoS lists as before.
+- No existing official entries or SavedVariables are migrated, overwritten, or merged into P-Hits.
+- No live in-game test was performed by the build agent.
+
 ## Kanonfode – Kill on Sight (K-KoS) v0.4.18 — Automatic Bug Tracer and logo
 
 ### Added

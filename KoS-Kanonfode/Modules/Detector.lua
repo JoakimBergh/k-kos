@@ -279,14 +279,19 @@ local function GetUnitFullNameSafe(unit)
 end
 
 local function UnitTargetsPlayer(unit)
-  if not unit or unit == "" then return false end
-  if not UnitExists or not UnitIsUnit then return false end
+  if not unit or unit == "" then return nil end
+  if not UnitExists or not UnitIsUnit then return nil end
   local u = unit .. "target"
-  local ok, result = pcall(function()
-    if not UnitExists(u) then return false end
+  local okExists, exists = pcall(function()
+    return UnitExists(u) and true or false
+  end)
+  if not okExists then return nil end
+  if not exists then return false end
+  local okTarget, targetsPlayer = pcall(function()
     return UnitIsUnit(u, "player") and true or false
   end)
-  return (ok and result) or false
+  if not okTarget then return nil end
+  return targetsPlayer
 end
 
 -- Spy-style target alerts are transition-based and throttled per player. The scan
@@ -331,9 +336,16 @@ local function ObserveTargeting(name, classFile, guid, targetingPlayer)
   local now = TargetingNow()
   CleanupTargetingState(now)
 
-  if not targetingPlayer then
+  if targetingPlayer == false then
     targetingStateByGUID[guid] = nil
+    local Notifier = GetNotifier()
+    if Notifier and Notifier.ClearTargetingAlert then
+      Notifier:ClearTargetingAlert(guid)
+    end
     RecordTrace("target_alert_not_targeting")
+    return
+  elseif targetingPlayer ~= true then
+    RecordTrace("target_alert_state_unknown")
     return
   end
 
@@ -363,7 +375,7 @@ local function ObserveTargeting(name, classFile, guid, targetingPlayer)
   local Notifier = GetNotifier()
   if Notifier and Notifier.NotifyTargetingYou then
     RecordTrace("target_alert_sent")
-    Notifier:NotifyTargetingYou(name, classFile)
+    Notifier:NotifyTargetingYou(name, classFile, guid)
   else
     RecordTrace("target_alert_notifier_missing", { notifier = Notifier ~= nil })
   end
@@ -700,10 +712,16 @@ function Detector:CheckUnit(unit, forceNearby)
   end
   local guild = GetUnitGuild(unit)
 
-  -- Only confirmed hostile player units can trigger this alert. If UnitIsUnit
-  -- returns a protected/secret value, UnitTargetsPlayer safely returns false.
+  -- Only confirmed hostile player units can trigger this alert. Unknown or
+  -- protected target relations do not dismiss an existing alert.
   if isEnemyPlayer then
     ObserveTargeting(name, classFile, guid, targetsPlayer)
+  elseif guid and (isPlayerUnit or isPlayerGUID) and isHostile == false then
+    targetingStateByGUID[guid] = nil
+    local Notifier = GetNotifier()
+    if Notifier and Notifier.ClearTargetingAlert then
+      Notifier:ClearTargetingAlert(guid)
+    end
   end
 
   -- Snapshot identities BEFORE the nameplate unit token becomes invalid.
@@ -768,6 +786,8 @@ function Detector:CheckUnit(unit, forceNearby)
       local pe = DB.LookupPlayer and DB:LookupPlayer(name)
       if pe then
         kosType = pe.type or (L and L.KOS) or "KoS"
+      elseif DB.LookupPersonalPlayer and DB:LookupPersonalPlayer(name) then
+        kosType = (L and L.PERSONAL_HIT) or "P-Hit"
       elseif guild and DB.LookupGuild then
         local ge = DB:LookupGuild(guild)
         if ge then
@@ -810,6 +830,20 @@ function Detector:CheckUnit(unit, forceNearby)
     local key = "p:" .. (CanonicalKey(name) or name:lower())
     if ShouldNotify(key) then
       Notifier:NotifyPlayer(playerEntry.type or (L and L.KOS) or "KoS", name, playerEntry.reason)
+    end
+    return
+  end
+
+  -- Personal P-Hits are local player-only targets. They use the familiar KoS
+  -- notification path while remaining outside the official sync database.
+  local personalEntry = DB.LookupPersonalPlayer and DB:LookupPersonalPlayer(name)
+  if personalEntry then
+    if DB.MarkSeenPersonalPlayer then DB:MarkSeenPersonalPlayer(name) end
+    ScheduleGUIRefresh()
+
+    local key = "h:" .. (CanonicalKey(name) or name:lower())
+    if ShouldNotify(key) then
+      Notifier:NotifyPlayer((L and L.PERSONAL_HIT) or "P-Hit", name)
     end
     return
   end
@@ -882,13 +916,25 @@ function Detector:CheckTargetingUnit(unit)
 
   if not info.hostilePlayer then
     targetingStateByGUID[info.guid] = nil
+    local Notifier = GetNotifier()
+    if Notifier and Notifier.ClearTargetingAlert then
+      Notifier:ClearTargetingAlert(info.guid)
+    end
     RecordTrace("target_scan_not_hostile_player", { unit = TraceUnitToken(unit) })
     return
   end
 
-  if not UnitTargetsPlayer(unit) then
+  local targetsPlayer = UnitTargetsPlayer(unit)
+  if targetsPlayer == false then
     targetingStateByGUID[info.guid] = nil
+    local Notifier = GetNotifier()
+    if Notifier and Notifier.ClearTargetingAlert then
+      Notifier:ClearTargetingAlert(info.guid)
+    end
     RecordTrace("target_scan_not_targeting_you", { unit = TraceUnitToken(unit) })
+    return
+  elseif targetsPlayer ~= true then
+    RecordTrace("target_scan_target_state_unknown", { unit = TraceUnitToken(unit) })
     return
   end
 

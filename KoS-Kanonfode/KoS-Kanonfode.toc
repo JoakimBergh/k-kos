@@ -1,8 +1,8 @@
 ## Interface: 16001
-## Title: Kanonfode – Kill on Sight (K-KoS) v0.4.18
+## Title: Kanonfode – Kill on Sight (K-KoS) v0.4.20
 ## Notes: Kanonfode fork of Kill on Sight: Forever (WPvP focused)
 ## Author: Milestorme
-## Version: 0.4.18
+## Version: 0.4.20
 ## Category: Combat
 ## IconTexture: Interface/AddOns/KoS-Kanonfode/icon.tga
 ## SavedVariables: KillOnSightDB

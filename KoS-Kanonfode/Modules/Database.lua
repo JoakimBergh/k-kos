@@ -54,6 +54,9 @@ local function CharKey()
 end
 
 local DEFAULTS = {
+  -- Local, account-wide P-Hits live beside the official database, outside data.
+  -- Guild Sync serializes only realmDB.data.players and realmDB.data.guilds.
+  personalPlayers = {},
   settings = {
     enableSound = true,
     enableScreenFlash = true,
@@ -400,12 +403,17 @@ function DB:Init()
     end
   end
 
+  if realmDB.personalPlayers ~= nil and type(realmDB.personalPlayers) ~= "table" then
+    realmDB.personalPlayers = {}
+  end
+
   -- Ensure defaults exist on the global DB and its single persistent settings table.
   DeepCopy(realmDB, DEFAULTS)
 
   self.realmKey = "GLOBAL"
   self.realmDB = realmDB
   self.settings = realmDB.settings
+  realmDB.personalPlayers = type(realmDB.personalPlayers) == "table" and realmDB.personalPlayers or {}
   realmDB.data = realmDB.data or {}
   realmDB.data.changes = type(realmDB.data.changes) == "table" and realmDB.data.changes or {}
   DeepCopy(self.settings, DEFAULTS.settings)
@@ -516,6 +524,12 @@ end
 function DB:GetData()
   local realmDB = self:_EnsureRealmDB()
   return realmDB.data
+end
+
+function DB:GetPersonalPlayers()
+  local realmDB = self:_EnsureRealmDB()
+  realmDB.personalPlayers = type(realmDB.personalPlayers) == "table" and realmDB.personalPlayers or {}
+  return realmDB.personalPlayers
 end
 
 local CloneOfficialEntry
@@ -1016,6 +1030,56 @@ end
 function DB:LookupGuild(guild)
   if not guild or guild == "" then return nil end
   return self:GetData().guilds[guild:lower()]
+end
+
+local function PersonalPlayerListChanged(name, key)
+  local nearby = _G.KillOnSight_Nearby
+  if nearby and nearby.OnListChanged then
+    pcall(function() nearby:OnListChanged("H", key or CanonicalPlayerKey(name) or "") end)
+  end
+  local gui = _G.KillOnSight_GUI
+  if gui and gui.RefreshAll then pcall(function() gui:RefreshAll() end) end
+end
+
+function DB:LookupPersonalPlayer(name)
+  if not name then return nil end
+  return self:GetPersonalPlayers()[CanonicalPlayerKey(name)]
+end
+
+function DB:HasPersonalPlayer(name)
+  return self:LookupPersonalPlayer(name) ~= nil
+end
+
+function DB:AddPersonalPlayer(name)
+  name = norm(name)
+  if not name or #name > 160 then return false end
+  local key = CanonicalPlayerKey(name)
+  if not key or key == "" then return false end
+  local personalPlayers = self:GetPersonalPlayers()
+  if personalPlayers[key] then return false end
+  personalPlayers[key] = { name = name, addedAt = Now() }
+  PersonalPlayerListChanged(name, key)
+  return true
+end
+
+function DB:RemovePersonalPlayer(name)
+  name = norm(name)
+  if not name then return false end
+  local key = CanonicalPlayerKey(name)
+  if not key or key == "" then return false end
+  local personalPlayers = self:GetPersonalPlayers()
+  local entry = personalPlayers[key]
+  if not entry then return false end
+  personalPlayers[key] = nil
+  PersonalPlayerListChanged(name, key)
+  return true
+end
+
+function DB:MarkSeenPersonalPlayer(name)
+  local entry = self:LookupPersonalPlayer(name)
+  if not entry then return end
+  entry.lastSeenAt = Now()
+  entry.lastSeenZone = GetRealZoneText() or GetZoneText() or ""
 end
 
 function DB:SetPlayerClass(name, class)

@@ -312,8 +312,17 @@ local function EnsureSpyAlertWindow()
   f._targetButton = targetButton
   f:HookScript("OnHide", function(self)
     self._targetName = nil
+    self._targetGUID = nil
     SetAlertTargetMacro(self, nil)
   end)
+
+  local dismissButton = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+  dismissButton:SetSize(18, 18)
+  dismissButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", -1, -1)
+  dismissButton:SetScript("OnClick", function()
+    if Notifier.DismissSpyAlert then Notifier:DismissSpyAlert() end
+  end)
+  f._dismissButton = dismissButton
 
   f.Location = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   f.Location:SetPoint("TOPLEFT", f, "TOPLEFT", 42, -26)
@@ -372,11 +381,30 @@ local function CancelSpyAlertAnimation(f)
   if f and f.SetScript then f:SetScript("OnUpdate", nil) end
 end
 
+function Notifier:DismissSpyAlert()
+  local f = self._spyAlertWindow
+  if not f then return false end
+  CancelSpyAlertAnimation(f)
+  _FlashStopWindow(f)
+  f:SetScript("OnUpdate", nil)
+  f:SetAlpha(1)
+  if f:IsShown() then f:Hide() end
+  return true
+end
+
+function Notifier:ClearTargetingAlert(guid)
+  local f = self._spyAlertWindow
+  if not f or f._alertKind ~= "targeting" then return false end
+  if guid and f._targetGUID ~= guid then return false end
+  return self:DismissSpyAlert()
+end
+
 function Notifier:ShowSpyStealthAlert(name, classFile)
   local f = EnsureSpyAlertWindow()
   CancelSpyAlertAnimation(f)
   f._alertKind = "stealth"
   f._targetName = nil
+  f._targetGUID = nil
   SetAlertTargetMacro(f, nil)
 
   -- Title (localized)
@@ -449,12 +477,13 @@ function Notifier:ShowSpyStealthAlert(name, classFile)
   end
 end
 
-function Notifier:ShowSpyTargetAlert(name, classFile)
+function Notifier:ShowSpyTargetAlert(name, classFile, guid)
   local f = EnsureSpyAlertWindow()
   if f:IsShown() and f._alertKind == "stealth" then return end
   CancelSpyAlertAnimation(f)
   f._alertKind = "targeting"
   f._targetName = name
+  f._targetGUID = guid
   SetAlertTargetMacro(f, name)
 
   if f.Title and f.Title.SetText then
@@ -566,7 +595,7 @@ function Notifier:Sound()
   PlaySound(SOUNDKIT.RAID_WARNING, "Master")
 end
 
-function Notifier:NotifyTargetingYou(name, classFile)
+function Notifier:NotifyTargetingYou(name, classFile, guid)
   if IsDisabled() then
     RecordTrace("target_alert_inactive", { active = false })
     return
@@ -580,7 +609,7 @@ function Notifier:NotifyTargetingYou(name, classFile)
     RecordTrace("target_alert_disabled")
     return
   end
-  self:ShowSpyTargetAlert(name, classFile)
+  self:ShowSpyTargetAlert(name, classFile, guid)
   RecordTrace("target_alert_window_requested")
   if prof.enableSound ~= false then
     local played = self:PlayBundledSound("detected-nearby.mp3")

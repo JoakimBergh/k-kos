@@ -630,6 +630,24 @@ local function BuildPlayers()
   return out
 end
 
+local function BuildPersonalHits()
+  local out = {}
+  local sorted = SortPairs(DB:GetPersonalPlayers(), function(v) return (v.name or ""):lower() end)
+  SortNewestEntries(sorted)
+  for _, it in ipairs(sorted) do
+    local entry = it.v
+    local classFile = _NormalizeClass(_GuessClassFor(entry.name, nil))
+    out[#out + 1] = {
+      _key = it.k,
+      _nameRaw = entry.name,
+      _class = classFile,
+      name = _ColorizeName(entry.name or "", classFile),
+      added = FormatTime(entry.addedAt),
+    }
+  end
+  return out
+end
+
 local function BuildGuilds()
   local out = {}
   local data = DB:GetData()
@@ -663,12 +681,14 @@ local function BuildLastAttackers(limit)
     local util = _G.KillOnSight_Util
     local isKoS = (rawName ~= "" and DB.HasPlayer and DB:HasPlayer(rawName))
     local isGuild = (e.guild and e.guild ~= "" and DB.HasGuild and DB:HasGuild(e.guild))
+    local isPersonalHit = (rawName ~= "" and DB.HasPersonalPlayer and DB:HasPersonalPlayer(rawName))
     local tag = ""
     if util and util.AppendTags then
-      tag = util:AppendTags("", isKoS, isGuild)
+      tag = util:AppendTags("", isKoS, isGuild, isPersonalHit)
     else
       if isKoS then tag = " |cffff0000[KoS]|r" end
       if isGuild then tag = " |cffffd000[Guild]|r" end
+      if isPersonalHit then tag = tag .. " |cff33ccff(P)|r" end
     end
 
     items[#items+1] = {
@@ -809,12 +829,14 @@ local function BuildStats(opts)
         local classFile = _NormalizeClass(e.classFile) or _GuessClassFor(name, nil)
         local isKos = (kosPlayers and kosPlayers[k]) ~= nil
         local isGuild = (guild ~= "") and hasGuild(guild)
+        local isPersonalHit = DB.HasPersonalPlayer and DB:HasPersonalPlayer(displayName or name)
         local nameText = _ColorizeName(displayName or name, classFile)
         if util and util.AppendTags then
-          nameText = util:AppendTags(nameText, isKos, isGuild)
+          nameText = util:AppendTags(nameText, isKos, isGuild, isPersonalHit)
         else
           if isKos then nameText = nameText .. " |cffff0000[KoS]|r" end
           if isGuild then nameText = nameText .. " |cffffd000[Guild]|r" end
+          if isPersonalHit then nameText = nameText .. " |cff33ccff(P)|r" end
         end
 
         local seenN = tonumber(e.seenCount or 0) or 0
@@ -1107,6 +1129,8 @@ end
         self.title:SetText(L.UI_ATTACKERS_TITLE)
       elseif id == 5 and L and L.UI_OPTIONS_TITLE then
         self.title:SetText(L.UI_OPTIONS_TITLE)
+      elseif id == 6 and L and L.UI_PERSONAL_HITS_TITLE then
+        self.title:SetText(L.UI_PERSONAL_HITS_TITLE)
       elseif L and L.UI_TITLE then
         self.title:SetText(L.UI_TITLE)
       end
@@ -1139,13 +1163,14 @@ end
   local t3 = MakeTab(frame, 3, L.UI_TAB_ATTACKERS)
   local t4 = MakeTab(frame, 4, (L.UI_TAB_STATS or "Stats"))
   local t5 = MakeTab(frame, 5, L.UI_OPTIONS)
+  local t6 = MakeTab(frame, 6, L.UI_TAB_PERSONAL_HITS or "P-Hits")
 
   if t3 then
     t3:Hide()
   end
 
   -- Tab layout: place tabs BELOW the frame (so they don't overlap the window content)
-  local tabs = {t1, t2, t3, t4, t5}
+  local tabs = {t1, t2, t6, t3, t4, t5}
   frame.tabs = tabs
   frame:LayoutTabs()
 
@@ -1335,6 +1360,109 @@ local pPlayers = CreateFrame("Frame", nil, frame)
     GUI:RefreshAll()
     UpdateAddState()
   end)
+
+  -- Personal P-Hits: account-local player targets that any member can manage.
+  local pHits = CreateFrame("Frame", nil, frame)
+  pHits:SetAllPoints(frame)
+  pHits:SetPoint("TOPLEFT", 12, -42)
+  pHits:SetPoint("BOTTOMRIGHT", -12, 12)
+  pHits:Hide()
+  frame.tabPanels[6] = pHits
+
+  local pHitsRemove = MakeButton(pHits, L.UI_REMOVE, 80, 22)
+  pHitsRemove:SetPoint("TOPRIGHT", pHits, "TOPRIGHT", -10, -10)
+  local pHitsAdd = MakeButton(pHits, L.UI_ADD, 80, 22)
+  pHitsAdd:SetPoint("RIGHT", pHitsRemove, "LEFT", -6, 0)
+
+  local pHitsNameLabel = pHits:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  pHitsNameLabel:SetTextColor(1, 0.82, 0)
+  pHitsNameLabel:SetText(L.UI_NAME)
+  pHitsNameLabel:SetPoint("TOPLEFT", pHits, "TOPLEFT", 90, -14)
+
+  local pHitsNameBox = MakeEditBox(pHits, 160)
+  pHitsNameBox:SetPoint("TOPLEFT", pHits, "TOPLEFT", 135, -10)
+  pHitsNameBox:SetWidth(160)
+  pHitsNameBox:SetText("")
+
+  local pHitsHint = pHits:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  pHitsHint:SetPoint("TOPLEFT", pHits, "TOPLEFT", 90, -42)
+  pHitsHint:SetText(L.UI_PERSONAL_HITS_HINT or "Personal player list · visible only to you")
+  pHitsHint:SetTextColor(1, 0.82, 0.35)
+
+  local function CurrentTargetPlayerName()
+    if UnitExists("target") and UnitIsPlayer("target") then
+      local util = _G.KillOnSight_Util
+      return util and util.UnitPlayerName and util:UnitPlayerName("target") or nil
+    end
+  end
+
+  local function UpdatePHitsAddState()
+    if not pHitsAdd or not pHitsNameBox then return end
+    local name = (pHitsNameBox:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then
+      name = CurrentTargetPlayerName() or ""
+    end
+    local exists = name ~= "" and DB.HasPersonalPlayer and DB:HasPersonalPlayer(name)
+    if name == "" or exists then
+      pHitsAdd:Disable()
+      pHitsAdd:SetAlpha(0.35)
+    else
+      pHitsAdd:Enable()
+      pHitsAdd:SetAlpha(1)
+    end
+  end
+
+  local pHitsList = CreateScrollList(pHits, {
+    {key="name", title=L.UI_NAME, width=280},
+    {key="added", title=L.UI_ADDED or "Added", width=150},
+  })
+  pHitsList:SetPoint("TOPLEFT", 0, -58)
+  pHitsList:SetPoint("BOTTOMRIGHT", 0, 0)
+  pHits._list = pHitsList
+  pHits._selected = nil
+  pHitsList.onSelect = function(key)
+    pHits._selected = key
+    UpdatePHitsAddState()
+  end
+
+  pHitsNameBox:HookScript("OnTextChanged", function()
+    pHits._selected = nil
+    if pHitsList then pHitsList.selectedKey = nil end
+    UpdatePHitsAddState()
+  end)
+  pHitsNameBox:HookScript("OnEditFocusGained", UpdatePHitsAddState)
+  pHitsNameBox:HookScript("OnEditFocusLost", UpdatePHitsAddState)
+
+  local pHitsTargetState = CreateFrame("Frame", nil, pHits)
+  pHitsTargetState:RegisterEvent("PLAYER_TARGET_CHANGED")
+  pHitsTargetState:SetScript("OnEvent", UpdatePHitsAddState)
+
+  pHitsAdd:SetScript("OnClick", function()
+    local name = (pHitsNameBox:GetText() or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if name == "" then name = CurrentTargetPlayerName() or "" end
+    if name == "" then return end
+    if DB:AddPersonalPlayer(name) then
+      pHits._selected = nil
+      pHitsList.selectedKey = nil
+      pHitsNameBox:SetText("")
+    end
+    GUI:RefreshAll()
+    UpdatePHitsAddState()
+  end)
+
+  pHitsRemove:SetScript("OnClick", function()
+    local key = pHits._selected or pHitsList.selectedKey
+    local entry = key and DB:GetPersonalPlayers()[key]
+    local name = (entry and entry.name) or pHitsNameBox:GetText()
+    if name and name ~= "" then DB:RemovePersonalPlayer(name) end
+    pHits._selected = nil
+    pHitsList.selectedKey = nil
+    pHitsNameBox:SetText("")
+    GUI:RefreshAll()
+    UpdatePHitsAddState()
+  end)
+
+  UpdatePHitsAddState()
 
   -- guilds panel
   local pGuilds = CreateFrame("Frame", nil, frame)
@@ -1914,7 +2042,7 @@ local factionLabel = "-"
   local version = versionInfo and type(versionInfo.GetInstalledVersion) == "function"
     and versionInfo.GetInstalledVersion(ADDON_NAME)
   if not version or version == "" then
-    version = versionInfo and versionInfo.CURRENT or "0.4.18"
+    version = versionInfo and versionInfo.CURRENT or "0.4.20"
   end
   tVersion:SetText((L.UI_VERSION or "Version") .. ": v" .. tostring(version))
 
@@ -2337,6 +2465,8 @@ end
       pStats._Refresh()
     elseif id == 5 and GUI.RefreshCommStatus then
       GUI:RefreshCommStatus()
+    elseif id == 6 and pHits._list then
+      pHits._list:SetData(BuildPersonalHits())
     end
   end
 
@@ -2347,6 +2477,7 @@ end
   frame._guildsPanel = pGuilds
   frame._seenPanel = pSeen
   frame._attackersPanel = pAtk
+  frame._personalHitsPanel = pHits
   frame._statsPanel = pStats
 end
 

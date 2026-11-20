@@ -7,7 +7,7 @@ local Util = {}
 
 -- Append unified tags to a pre-colored name.
 -- Used by Nearby / Attackers / Stats so tag logic isn't duplicated.
-function Util:AppendTags(nameText, isKoS, isGuild)
+function Util:AppendTags(nameText, isKoS, isGuild, isPersonalHit)
   local out = nameText or ""
 
   if isKoS then
@@ -18,6 +18,10 @@ function Util:AppendTags(nameText, isKoS, isGuild)
   if isGuild then
     local tag = (L and (L.UI_TAG_GUILD)) or "Guild"
     out = out .. " |cffffd000[" .. tag .. "]|r"
+  end
+
+  if isPersonalHit then
+    out = out .. " |cff33ccff(P)|r"
   end
 
   return out

@@ -1,4 +1,4 @@
-# Kanonfode – Kill on Sight (K-KoS) v0.4.18
+# Kanonfode – Kill on Sight (K-KoS) v0.4.20
 
 ### Author: Kanonfode
 
@@ -7,19 +7,22 @@ K-KoS is the Kanonfode-maintained version of Kill on Sight: Forever. It preserve
 ## Features
 
 - **Player KoS** — official individual-player list, maintained by the Master Administrator.
+- **P-Hits** — a personal player-only hitlist each member can edit locally; Nearby marks these players with `(P)` and uses the normal KoS alert behavior.
 - **Guild KoS** — official guild list, maintained separately from Player KoS.
-- **Nearby** — detects and displays hostile players whether or not they are on either KoS list.
+- **Nearby** — detects and displays hostile players whether or not they are on a list.
   - Player KoS uses a red `[KoS]` tag.
   - Guild KoS uses a gold `[Guild]` tag.
-  - Both tags appear when a player matches both lists.
+  - Personal P-Hits use a cyan `(P)` suffix after the name.
+  - Every matching tag appears when a player matches multiple lists.
 - **Nearby alert scope** — `All Enemies` or `KoS List Only`; this filters the generic Nearby arrival sound only, not detection.
 - **Nearby range** — adjustable from 60 to 200 yards; defaults to 100. High-confidence threats retain the existing 1.5x extension.
 - **Notifications** — chat, screen flash, sound and stealth-detection alerts.
-- **Targeting alert** — Spy-style red alert and sound when a visible hostile player starts targeting you; click the name to target them when combat lockdown permits it.
+- **Targeting alert** — Spy-style red alert and sound when a visible hostile player starts targeting you; it closes when that player stops targeting you, when you die, or when you press X. Click the name to target them when combat lockdown permits it.
 - **Statistics** — first seen, last seen, seen count, wins and losses.
 - **Options** — one automatically saved configuration; no profile manager.
 - **Battleground/Arena protection** — KoS activity pauses inside Battlegrounds and Arenas and resumes after leaving.
 - **Guild Sync** — automatic, silent synchronization of official Player/Guild lists using private addon WHISPER messages.
+- P-Hits are saved locally per WoW account. Guild Sync continues to exchange the official Player KoS and Guild KoS lists only.
 - **Manual class assignment** — the list master can select a Player KoS entry and set its class.
 - **Escape closes the main window**.
 - **Options version label** — shows the installed addon version beside KoS / Guild.
@@ -32,6 +35,10 @@ K-KoS is the Kanonfode-maintained version of Kill on Sight: Forever. It preserve
 ## Opening KoS
 
 Use the K-KoS minimap icon (left-click) to open or close the main window. The Options tab displays Guild Sync status. The addons intentionally register **no slash commands**, to avoid taint propagation through WoW's macro/chat parser.
+
+## P-Hits
+
+Open the **P-Hits** tab to add or remove personal player targets. Leave the name blank and target a player to add that target. You can also right-click a Nearby player and choose **Add to P-Hits** or **Remove from P-Hits**. A personal target appears with `(P)` and triggers the normal player KoS alert. These entries are saved per WoW account and remain local; the official Player KoS and Guild KoS lists continue to synchronize through Guild Sync.
 
 ## Optional Bug Tracer
 
@@ -62,6 +69,8 @@ The legacy SavedVariables key `KillOnSightDB` and internal Lua namespace remain 
 
 ## Current validation notes
 
+- v0.4.20 clears the target alert when the matching enemy is observed targeting someone else, clears it on death, and adds an X close button. Static review only; no live in-game test was performed.
+- v0.4.19 adds the local, account-wide P-Hits player list, Nearby `(P)` tags, and normal KoS-style alerts for personal targets while keeping official Guild Sync data unchanged. No live in-game test was performed.
 - v0.4.18 starts the Bug Tracer automatically when its enabled child addon loads, shows the K-KoS logo beside it, and keeps its bounded diagnostics local and in memory.
 - v0.4.17 adds the separate Bug Tracer child addon with an 80-event in-memory ring buffer, no player identifiers/chat, and no slash-command registration.
 - v0.4.16 lets you drag the Spy-style alert frame to a preferred screen position and saves that position across reloads. Drag by the alert background; the clickable name area remains a target button.

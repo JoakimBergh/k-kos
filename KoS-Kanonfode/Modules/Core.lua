@@ -435,6 +435,12 @@ Core:SetScript("OnEvent", function(self, event, ...)
 
   -- Best-effort PvP outcome tracking. Delegated to Midnight_Stats.lua.
   if event == "PLAYER_PVP_KILLS_CHANGED" or event == "PLAYER_DEAD" then
+    if event == "PLAYER_DEAD" then
+      local Notifier = GetNotifier()
+      if Notifier and Notifier.ClearTargetingAlert then
+        Notifier:ClearTargetingAlert()
+      end
+    end
     if not Core:IsKoSActive() then return end
     local Stats = GetMidnightStats()
     if Stats and Stats.OnEvent then

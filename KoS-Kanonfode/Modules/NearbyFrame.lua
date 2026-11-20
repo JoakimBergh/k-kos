@@ -73,24 +73,27 @@ local function IsInGoblinTown()
   return sub == bb or mini == bb or sub == gz or mini == gz
 end
 
--- Recompute Player KoS and Guild KoS membership independently.
--- Keep both flags so one player can be visibly identified by both lists.
+-- Recompute official Player KoS, personal P-Hits and Guild KoS independently.
+-- Keep all flags so one player can carry several visible markers.
 -- Hidden is handled separately and is never stored as a list-membership flag.
 local function ComputeKoSFlagsForEntry(e, DB)
-  if not e or not DB then return false, false end
+  if not e or not DB then return false, false, false end
   local name = e.fullName or e.name
   local isPlayerKoS = name and DB.LookupPlayer and DB:LookupPlayer(name) ~= nil or false
+  local isPersonalHit = name and DB.LookupPersonalPlayer and DB:LookupPersonalPlayer(name) ~= nil or false
   local guild = e.guild
   local isGuildKoS = guild and guild ~= "" and DB.LookupGuild and DB:LookupGuild(guild) ~= nil or false
-  return isPlayerKoS, isGuildKoS
+  return isPlayerKoS, isGuildKoS, isPersonalHit
 end
 
 local function ApplyKoSFlagsForEntry(e, DB)
   if not e then return nil end
-  local isPlayerKoS, isGuildKoS = ComputeKoSFlagsForEntry(e, DB)
+  local isPlayerKoS, isGuildKoS, isPersonalHit = ComputeKoSFlagsForEntry(e, DB)
   e.isPlayerKoS = isPlayerKoS and true or nil
   e.isGuildKoS = isGuildKoS and true or nil
+  e.isPersonalHit = isPersonalHit and true or nil
   if isPlayerKoS then return L.KOS end
+  if isPersonalHit then return L.PERSONAL_HIT or "P-Hit" end
   if isGuildKoS then return L.GUILD_KOS end
   return nil
 end
@@ -462,9 +465,11 @@ end
 
   local isPlayerKoS = e.isPlayerKoS or e.kosType == L.KOS
   local isGuildKoS = e.isGuildKoS or e.kosType == L.GUILD_KOS
+  local isPersonalHit = e.isPersonalHit or e.kosType == L.PERSONAL_HIT
   if isPlayerKoS then GameTooltip:AddLine(L.TT_ON_KOS, 1, 0.2, 0.2) end
   if isGuildKoS then GameTooltip:AddLine(L.TT_GUILD_KOS, 1, 0.8, 0.2) end
-  if not isPlayerKoS and not isGuildKoS and ((e.isHidden == true) or (e.kosType == L.HIDDEN)) then
+  if isPersonalHit then GameTooltip:AddLine(L.UI_PERSONAL_HITS_TITLE or "P-Hits", 0.2, 0.8, 1) end
+  if not isPlayerKoS and not isGuildKoS and not isPersonalHit and ((e.isHidden == true) or (e.kosType == L.HIDDEN)) then
     GameTooltip:AddLine("[" .. (L.HIDDEN or "Hidden") .. "]", 0.7,0.7,0.7)
   end
 
@@ -1104,11 +1109,13 @@ function Nearby:AlertNewEnemy(e)
   local Lk = KillOnSight_L
   local t = e.kosType
 
-  -- KoS / Guild-KoS: keep the strong alert behavior (sound + flash) exactly as before.
+  -- Official KoS, Guild-KoS and local P-Hits use the strong alert behavior.
   -- NOTE: We *must not* rely on (t == Lk.KOS) if locale keys are missing (nil), so we guard with t.
-  local isKoS = false
+  local isKoS = e.isPersonalHit == true
   if t then
-    if (Lk and Lk.KOS and t == Lk.KOS) or (Lk and Lk.GUILD_KOS and t == Lk.GUILD_KOS) or t == "KoS" or t == "Guild-KoS" then
+    if (Lk and Lk.KOS and t == Lk.KOS) or (Lk and Lk.GUILD_KOS and t == Lk.GUILD_KOS)
+        or (Lk and Lk.PERSONAL_HIT and t == Lk.PERSONAL_HIT)
+        or t == "KoS" or t == "Guild-KoS" or t == "P-Hit" then
       isKoS = true
     end
   end
@@ -1155,7 +1162,9 @@ function Nearby:ConsumeKoSGuildAnnouncement(name, listType)
   local Lk = KillOnSight_L
   local isKoS = false
   if listType then
-    if (Lk and Lk.KOS and listType == Lk.KOS) or (Lk and Lk.GUILD_KOS and listType == Lk.GUILD_KOS) or listType == "KoS" or listType == "Guild-KoS" then
+    if (Lk and Lk.KOS and listType == Lk.KOS) or (Lk and Lk.GUILD_KOS and listType == Lk.GUILD_KOS)
+        or (Lk and Lk.PERSONAL_HIT and listType == Lk.PERSONAL_HIT)
+        or listType == "KoS" or listType == "Guild-KoS" or listType == "P-Hit" then
       isKoS = true
     end
   end
@@ -1242,8 +1251,8 @@ function Nearby:GetSortedList()
       self._sortedMap[e] = true
     end
     table.sort(self._sortedList, function(a, b)
-      local aKoS = (a.isPlayerKoS or a.isGuildKoS or a.kosType == L.KOS or a.kosType == L.GUILD_KOS)
-      local bKoS = (b.isPlayerKoS or b.isGuildKoS or b.kosType == L.KOS or b.kosType == L.GUILD_KOS)
+      local aKoS = (a.isPlayerKoS or a.isGuildKoS or a.isPersonalHit or a.kosType == L.KOS or a.kosType == L.GUILD_KOS or a.kosType == L.PERSONAL_HIT)
+      local bKoS = (b.isPlayerKoS or b.isGuildKoS or b.isPersonalHit or b.kosType == L.KOS or b.kosType == L.GUILD_KOS or b.kosType == L.PERSONAL_HIT)
       local aPri = (aKoS and 0 or 2) + ((a.state == "inactive") and 1 or 0)
       local bPri = (bKoS and 0 or 2) + ((b.state == "inactive") and 1 or 0)
       if aPri ~= bPri then return aPri < bPri end
@@ -1433,6 +1442,7 @@ local function RowLabel(e, tNow)
   local util = _G.KillOnSight_Util
   local isKoS = e.isPlayerKoS or (e.kosType == L.KOS)
   local isGuild = e.isGuildKoS or (e.kosType == L.GUILD_KOS)
+  local isPersonalHit = e.isPersonalHit or (e.kosType == L.PERSONAL_HIT)
   local tag = ""
   if util and util.AppendTags then
     tag = util:AppendTags("", isKoS, isGuild)
@@ -1440,14 +1450,16 @@ local function RowLabel(e, tNow)
     if isKoS then tag = " |cffff0000[KoS]|r" end
     if isGuild then tag = " |cffffd000[Guild]|r" end
   end
+  local personalTag = isPersonalHit and " |cff33ccff(P)|r" or ""
 
 
   -- Zone text intentionally suppressed
   local zone = ""
 
-  local line = ("%s%s|r |cffbbbbbbLv%s|r%s%s"):format(
+  local line = ("%s%s%s|r |cffbbbbbbLv%s|r%s%s"):format(
     c,
     e.name,
+    personalTag,
     lvl,
     tag,
     zone
@@ -1603,8 +1615,9 @@ local function ReportBuildAnnounceMessage(e)
   if e.isGuildKoS or e.kosType == L.GUILD_KOS then
     parts[#parts+1] = "[" .. L.GUILD_KOS .. "]"
   end
-
-  parts[#parts+1] = e.name or "?"
+  local displayName = e.name or "?"
+  if e.isPersonalHit or e.kosType == L.PERSONAL_HIT then displayName = displayName .. " (P)" end
+  parts[#parts+1] = displayName
 
   local details = {}
   local lvl = (e.level and e.level > 0) and tostring(e.level) or "??"
@@ -1677,6 +1690,7 @@ local function ShowMenuFor(self, e)
 
   local playerName = e.fullName or e.name
   local has = (DB.LookupPlayer and DB:LookupPlayer(playerName)) and true or false
+  local hasPersonal = DB.HasPersonalPlayer and DB:HasPersonalPlayer(playerName) or false
   local master = _G.KillOnSight_Master
   local canEditOfficial = master and master.CanEditOfficialLists and master:CanEditOfficialLists() == true
   local menu = {
@@ -1696,6 +1710,18 @@ local function ShowMenuFor(self, e)
     { text = L.UI_REMOVE_KOS, notCheckable = true, disabled = (not canEditOfficial) or (not has), func = function()
         DB:RemovePlayer(e.name)
         if e.kosType == L.KOS then e.kosType = nil end
+        self:MarkSortedDirty()
+        self:ScheduleRefresh(true)
+      end
+    },
+    { text = L.UI_ADD_PERSONAL_HIT or "Add to P-Hits", notCheckable = true, disabled = hasPersonal, func = function()
+        DB:AddPersonalPlayer(playerName)
+        self:MarkSortedDirty()
+        self:ScheduleRefresh(true)
+      end
+    },
+    { text = L.UI_REMOVE_PERSONAL_HIT or "Remove from P-Hits", notCheckable = true, disabled = not hasPersonal, func = function()
+        DB:RemovePersonalPlayer(playerName)
         self:MarkSortedDirty()
         self:ScheduleRefresh(true)
       end
@@ -1818,13 +1844,15 @@ local function UpdateScroll(self)
           row.skull:SetTexCoord(0.75, 1.0, 0.25, 0.5)
           if e.isPlayerKoS or e.kosType == L.KOS then
             row.skull:SetVertexColor(1, 0.25, 0.25, 1)
+          elseif e.isPersonalHit or e.kosType == L.PERSONAL_HIT then
+            row.skull:SetVertexColor(0.2, 0.8, 1, 1)
           elseif e.isGuildKoS or e.kosType == L.GUILD_KOS then
             row.skull:SetVertexColor(1, 0.78, 0.20, 1)
           else
             row.skull:SetVertexColor(1, 1, 1, 1)
           end
           row.skull:SetSize(13, 14)
-          row.skull:SetShown(e.isPlayerKoS or e.isGuildKoS or e.kosType == L.KOS or e.kosType == L.GUILD_KOS)
+          row.skull:SetShown(e.isPlayerKoS or e.isGuildKoS or e.isPersonalHit or e.kosType == L.KOS or e.kosType == L.GUILD_KOS or e.kosType == L.PERSONAL_HIT)
         end
       else
         if row.icon then row.icon:Hide() end
@@ -2355,7 +2383,7 @@ function Nearby:OnListChanged(kind, keyLower)
   local changedKey = canonical(keyLower)
   local dirty = false
   for _, e in pairs(self.entries) do
-    if kind == "P" then
+    if kind == "P" or kind == "H" then
       if canonical(e._lowerName) == changedKey or canonical(e.name) == changedKey or canonical(e.fullName) == changedKey then
         local newType = ApplyKoSFlagsForEntry(e, DB)
         if e.kosType ~= newType then
@@ -3035,7 +3063,7 @@ function Nearby:Seen(name, classFile, guild, kosType, level, guid, unit)
 
   local e = self.entries[key]
   local wasState = e and e.state or nil
-  local wasKoS = e and (e.kosType == L.KOS or e.kosType == L.GUILD_KOS) or false
+  local wasKoS = e and (e.kosType == L.KOS or e.kosType == L.GUILD_KOS or e.kosType == L.PERSONAL_HIT) or false
   local isNew = false
   if not e then
     self.orderCounter = (self.orderCounter or 0) + 1
@@ -3046,7 +3074,7 @@ function Nearby:Seen(name, classFile, guild, kosType, level, guid, unit)
 
   -- Spy-stable ordering: only mark sort dirty on structural/bucket changes (not every sighting).
   local wasInactive = (not isNew) and (e.state == "inactive")
-  local oldKoS = (e.kosType == L.KOS or e.kosType == L.GUILD_KOS)
+  local oldKoS = (e.kosType == L.KOS or e.kosType == L.GUILD_KOS or e.kosType == L.PERSONAL_HIT)
 
   -- Update identity fields and maps (GUID-first).
   e.guid = playerGuid or e.guid
@@ -3157,10 +3185,11 @@ end
   end
   -- Recheck against the complete resolved name, not the original first-name
   -- sighting. This also repairs tags on previously cached Nearby entries.
-  local isPlayerKoS, isGuildKoS = ComputeKoSFlagsForEntry(e, DB)
+  local isPlayerKoS, isGuildKoS, isPersonalHit = ComputeKoSFlagsForEntry(e, DB)
   e.isPlayerKoS = isPlayerKoS and true or nil
   e.isGuildKoS = isGuildKoS and true or nil
-  local resolvedType = isPlayerKoS and L.KOS or (isGuildKoS and L.GUILD_KOS or nil)
+  e.isPersonalHit = isPersonalHit and true or nil
+  local resolvedType = isPlayerKoS and L.KOS or (isPersonalHit and (L.PERSONAL_HIT or "P-Hit") or (isGuildKoS and L.GUILD_KOS or nil))
   if resolvedType then
     kosType = resolvedType
   elseif kosType == nil then
@@ -3170,15 +3199,17 @@ end
     e.isPlayerKoS = true
   elseif kosType == L.GUILD_KOS then
     e.isGuildKoS = true
+  elseif kosType == L.PERSONAL_HIT then
+    e.isPersonalHit = true
   end
   if kosType ~= nil then
-    local newKoS = (kosType == L.KOS or kosType == L.GUILD_KOS)
+    local newKoS = (kosType == L.KOS or kosType == L.GUILD_KOS or kosType == L.PERSONAL_HIT)
     if (not isNew) and (newKoS ~= wasKoS) then
       self:MarkSortedDirty()
     end
     e.kosType = kosType
   end
-  local newKoS = (e.kosType == L.KOS or e.kosType == L.GUILD_KOS)
+  local newKoS = (e.kosType == L.KOS or e.kosType == L.GUILD_KOS or e.kosType == L.PERSONAL_HIT)
   e.level = level or e.level
   e.zone = GetRealZoneText() or e.zone
   e.lastSeen = now
