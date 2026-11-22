@@ -1,4 +1,4 @@
-# Kanonfode – Kill on Sight (K-KoS) v0.4.20
+# Kanonfode – Kill on Sight (K-KoS) v0.4.21
 
 ### Author: Kanonfode
 

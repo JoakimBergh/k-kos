@@ -603,7 +603,7 @@ local function ReadUnitBoolean(api, ...)
 end
 
 -- Main entry point used by Core.lua (target/mouseover/nameplates/unit-scoped events).
-function Detector:CheckUnit(unit, forceNearby)
+function Detector:CheckUnit(unit, forceNearby, alertsOnly)
   if not unit or unit == "" then
     RecordTrace("no_unit")
     return
@@ -722,6 +722,48 @@ function Detector:CheckUnit(unit, forceNearby)
     if Notifier and Notifier.ClearTargetingAlert then
       Notifier:ClearTargetingAlert(guid)
     end
+  end
+
+  -- When Nearby is hidden, Core uses this alert-only path so list alerts keep
+  -- working without rebuilding Nearby rows or refreshing full Stats metadata.
+  if alertsOnly then
+    if not isEnemyPlayer then return end
+
+    local playerEntry = DB.LookupPlayer and DB:LookupPlayer(name)
+    if playerEntry then
+      if classFile and DB.SetPlayerClass then DB:SetPlayerClass(name, classFile) end
+      if DB.MarkSeenPlayer then DB:MarkSeenPlayer(name) end
+      ScheduleGUIRefresh()
+      local key = "p:" .. (CanonicalKey(name) or name:lower())
+      if ShouldNotify(key) then
+        Notifier:NotifyPlayer(playerEntry.type or (L and L.KOS) or "KoS", name, playerEntry.reason)
+      end
+      return
+    end
+
+    local personalEntry = DB.LookupPersonalPlayer and DB:LookupPersonalPlayer(name)
+    if personalEntry then
+      if DB.MarkSeenPersonalPlayer then DB:MarkSeenPersonalPlayer(name) end
+      ScheduleGUIRefresh()
+      local key = "h:" .. (CanonicalKey(name) or name:lower())
+      if ShouldNotify(key) then
+        Notifier:NotifyPlayer((L and L.PERSONAL_HIT) or "P-Hit", name)
+      end
+      return
+    end
+
+    if guild and guild ~= "" and DB.LookupGuild then
+      local guildEntry = DB:LookupGuild(guild)
+      if guildEntry then
+        if DB.MarkSeenGuild then DB:MarkSeenGuild(guild) end
+        ScheduleGUIRefresh()
+        local key = "g:" .. guild:lower()
+        if ShouldNotify(key) then
+          Notifier:NotifyGuild(guildEntry.type or (L and L.GUILD_KOS) or "Guild", name, guild, guildEntry.reason)
+        end
+      end
+    end
+    return
   end
 
   -- Snapshot identities BEFORE the nameplate unit token becomes invalid.

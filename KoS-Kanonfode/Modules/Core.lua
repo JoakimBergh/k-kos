@@ -197,6 +197,7 @@ local function WarnIfEnemyNameplatesDisabled()
 end
 
 local nearbyTicker
+local targetingTicker
 
 local function StartNearbyNameplateScan()
   if nearbyTicker then return end
@@ -205,25 +206,47 @@ local function StartNearbyNameplateScan()
     local Detector = GetDetector()
     if not Detector then return end
     local Nearby = GetNearby()
-    local targetOnly = Nearby and Nearby.frame and Nearby.frame.IsShown and (not Nearby.frame:IsShown())
-    local plates = C_NamePlate.GetNamePlates(false)
-    if plates then
+    local alertsOnly = Nearby and Nearby.frame and Nearby.frame.IsShown and (not Nearby.frame:IsShown())
+    local okPlates, plates = pcall(C_NamePlate.GetNamePlates)
+    if okPlates and type(plates) == "table" then
       for _, plate in ipairs(plates) do
         local unit = plate and plate.namePlateUnitToken
         if unit and not Core._bgDisabled and not Core._instDisabled then
-          if targetOnly and Detector.CheckTargetingUnit then
-            Detector:CheckTargetingUnit(unit)
-          else
+          if alertsOnly then
+            Detector:CheckUnit(unit, nil, true)
+          elseif Detector.CheckUnit then
             Detector:CheckUnit(unit)
           end
         end
       end
     end
-    -- Spy also samples your selected target and focus. Keep this lightweight path
-    -- active when the Nearby window is hidden so target alerts remain independent.
-    if not Core._bgDisabled and not Core._instDisabled and Detector.CheckTargetingUnit then
-      Detector:CheckTargetingUnit("target")
-      Detector:CheckTargetingUnit("focus")
+    -- Keep KoS-list alerts independent of the Nearby window for direct targets.
+    if alertsOnly and not Core._bgDisabled and not Core._instDisabled and Detector.CheckUnit then
+      Detector:CheckUnit("target", nil, true)
+      Detector:CheckUnit("focus", nil, true)
+    end
+  end)
+end
+
+-- Fast, lightweight Spy-style target scan. Keep the broader Nearby scan at
+-- 2.5 seconds; only target-relation checks run twice per second.
+local function StartTargetingScan()
+  if targetingTicker or not C_Timer or not C_Timer.NewTicker then return end
+  targetingTicker = C_Timer.NewTicker(0.5, function()
+    local Detector = GetDetector()
+    if not Detector or not Detector.CheckTargetingUnit then return end
+    if Core._bgDisabled or Core._instDisabled or not Core:IsKoSActive() then return end
+
+    Detector:CheckTargetingUnit("target")
+    Detector:CheckTargetingUnit("mouseover")
+    Detector:CheckTargetingUnit("focus")
+
+    if not C_NamePlate or type(C_NamePlate.GetNamePlates) ~= "function" then return end
+    local okPlates, plates = pcall(C_NamePlate.GetNamePlates)
+    if not okPlates or type(plates) ~= "table" then return end
+    for _, plate in ipairs(plates) do
+      local unit = plate and plate.namePlateUnitToken
+      if unit then Detector:CheckTargetingUnit(unit) end
     end
   end)
 end
@@ -388,6 +411,7 @@ Core:SetScript("OnEvent", function(self, event, ...)
     local Nearby = GetNearby()
     if Nearby and Nearby.Init then Nearby:Init() end
     StartNearbyNameplateScan()
+    StartTargetingScan()
     if GetMidnightStats() and GetMidnightStats().Init then GetMidnightStats():Init() end
     StartDeferredGuildResolveTicker()
     Print(L.MSG_LOADED)
@@ -462,6 +486,22 @@ Core:SetScript("OnEvent", function(self, event, ...)
     return
   end
 
+  if event == "UNIT_TARGET" then
+    if IsInPvEInstance() then
+      if not Core._instDisabled then ApplyPvEInstanceDisableState(true) end
+      return
+    elseif Core._instDisabled then
+      ApplyPvEInstanceDisableState(false)
+    end
+    if Core._bgDisabled then return end
+    local unit = ...
+    if type(unit) == "string" and (unit == "target" or unit == "mouseover" or unit == "focus" or unit:match("^nameplate%d+$")) then
+      if Detector and Detector.CheckTargetingUnit then Detector:CheckTargetingUnit(unit) end
+      if Detector and Detector.CheckUnit then Detector:CheckUnit(unit, nil, true) end
+    end
+    return
+  end
+
   if event == "NAME_PLATE_UNIT_REMOVED" then
     if IsInPvEInstance() then
       if not Core._instDisabled then ApplyPvEInstanceDisableState(true) end
@@ -509,6 +549,7 @@ SafeRegisterEvent("PLAYER_PVP_KILLS_CHANGED")
 SafeRegisterEvent("PLAYER_DEAD")
 SafeRegisterEvent("NAME_PLATE_UNIT_ADDED")
 SafeRegisterEvent("NAME_PLATE_UNIT_REMOVED")
+SafeRegisterEvent("UNIT_TARGET")
 
 -- Unit-scoped events
 SafeRegisterEvent("UNIT_AURA")

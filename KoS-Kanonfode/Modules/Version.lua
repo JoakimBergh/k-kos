@@ -1,5 +1,5 @@
 -- Version metadata compatibility for current WoW clients and older API surfaces.
-local VERSION = "0.4.20"
+local VERSION = "0.4.21"
 
 local function GetInstalledVersion(addonName)
   if type(addonName) ~= "string" or addonName == "" then return VERSION end

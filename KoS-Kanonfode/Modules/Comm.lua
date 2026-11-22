@@ -4,7 +4,7 @@
 -- because the Forever client can scroll the guild chat window for each one.
 local PREFIX = "KOSKANON"
 local PROTOCOL = 4
-local VERSION = _G.KillOnSight_Version and _G.KillOnSight_Version.CURRENT or "0.4.20"
+local VERSION = _G.KillOnSight_Version and _G.KillOnSight_Version.CURRENT or "0.4.21"
 local MASTER_NAME = "Calámir Dawnsinger"
 local HELLO_INTERVAL = 60
 local PEER_TTL = 600
