@@ -367,6 +367,9 @@ local function ObserveTargeting(name, classFile, guid, targetingPlayer)
   local key = CanonicalKey(name) or guid
   local lastAlert = targetingAlertAtByKey[key]
   if lastAlert and (now - lastAlert) < TARGETING_ALERT_COOLDOWN then
+    -- Keep this transition pending so the cooldown can expire while the same
+    -- hostile player is still targeting us.
+    targetingStateByGUID[guid] = lastSeen
     RecordTrace("target_alert_cooldown")
     return
   end
@@ -374,8 +377,13 @@ local function ObserveTargeting(name, classFile, guid, targetingPlayer)
 
   local Notifier = GetNotifier()
   if Notifier and Notifier.NotifyTargetingYou then
-    RecordTrace("target_alert_sent")
-    Notifier:NotifyTargetingYou(name, classFile, guid)
+    local result, status = Notifier:NotifyTargetingYou(name, classFile, guid)
+    if result == true then
+      RecordTrace("target_alert_sent")
+    else
+      -- Suppressed alerts are reported separately from alerts shown onscreen.
+      RecordTrace("target_alert_suppressed", { alertStatus = status or "unknown" })
+    end
   else
     RecordTrace("target_alert_notifier_missing", { notifier = Notifier ~= nil })
   end

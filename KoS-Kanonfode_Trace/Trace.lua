@@ -7,6 +7,20 @@ local Trace = {
 
 KillOnSight_Trace = Trace
 
+local COUNT_ONLY = {
+  ["detector/target_scan_unit_missing"] = true,
+  ["detector/target_scan_not_hostile_player"] = true,
+  ["detector/target_scan_not_targeting_you"] = true,
+  ["detector/target_scan_target_state_unknown"] = true,
+  ["detector/target_scan_confirmed"] = true,
+  ["detector/target_alert_repeat_suppressed"] = true,
+  ["detector/target_alert_not_targeting"] = true,
+  ["detector/target_alert_cooldown"] = true,
+  ["detector/target_alert_suppressed"] = true,
+  ["notifier/target_alert_goblin_suppressed"] = true,
+  ["notifier/target_alert_not_shown"] = true,
+  ["detector/unit_missing"] = true,
+}
 local MAX_EVENTS = 80
 local REPORT_EVENTS = 16
 local FIELD_ORDER = {
@@ -14,6 +28,7 @@ local FIELD_ORDER = {
   "player", "playerGuid", "hostile", "enemy", "attackable", "friendly",
   "direct", "forced", "within", "distanceKnown", "distanceSq", "rangeYards",
   "frameEnabled", "goblinFilter", "sound", "flash", "alertMode",
+  "alertStatus",
 }
 local ALLOWED_FIELDS = {}
 for _, key in ipairs(FIELD_ORDER) do ALLOWED_FIELDS[key] = true end
@@ -58,6 +73,14 @@ end
 
 function Trace:Record(component, reason, fields)
   if not self.enabled then return end
+  local countKey = tostring(component or "unknown") .. "/" .. tostring(reason or "unknown")
+  if COUNT_ONLY[countKey] then
+    local status = SafeCopyField(fields, "alertStatus")
+    if type(status) == "string" then countKey = countKey .. ":" .. status end
+    self.counts = self.counts or {}
+    self.counts[countKey] = (self.counts[countKey] or 0) + 1
+    return
+  end
   local event = {
     at = math.max(0, SafeNow() - (self.startedAt or SafeNow())),
     component = tostring(component or "unknown"),
@@ -74,6 +97,7 @@ end
 
 function Trace:Enable()
   self.events = {}
+  self.counts = {}
   self.startedAt = SafeNow()
   self.enabled = true
   self:Record("trace", "enabled")
@@ -89,6 +113,7 @@ end
 
 function Trace:Clear()
   self.events = {}
+  self.counts = {}
   if self.enabled then self:Record("trace", "cleared") end
   return true
 end
@@ -112,6 +137,10 @@ function Trace:Report()
       tostring(modules.db), tostring(modules.notifier), tostring(modules.detector),
       tostring(modules.nearby), tostring(modules.core), tostring(modules.active)),
   }
+  local countParts = {}
+  for key, n in pairs(self.counts or {}) do countParts[#countParts + 1] = key .. "=" .. n end
+  table.sort(countParts)
+  if #countParts > 0 then lines[#lines + 1] = "counted (not stored): " .. table.concat(countParts, " ") end
   local first = math.max(1, #self.events - REPORT_EVENTS + 1)
   for i = first, #self.events do
     local event = self.events[i]

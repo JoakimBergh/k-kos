@@ -25,7 +25,10 @@ function Notifier:SetDisabled(value)
     if timer and timer.Cancel then pcall(function() timer:Cancel() end) end
     self[key] = nil
   end
-  local frames = { self.warningFrame, self._spyFrame, self._spyAlertWindow, self._flashFrame }
+  local frames = {
+    self.warningFrame, self._spyFrame, self._spyAlertGroup,
+    self._stealthAlertWindow, self._targetAlertWindow, self._flashFrame,
+  }
   for _, frame in ipairs(frames) do
     if frame and frame._timer and frame._timer.Cancel then pcall(function() frame._timer:Cancel() end); frame._timer = nil end
     if frame and frame._kosStealthAnim and frame._kosStealthAnim.Cancel then pcall(function() frame._kosStealthAnim:Cancel() end); frame._kosStealthAnim = nil end
@@ -237,25 +240,95 @@ local function EnsureFlashFrame()
 end
 
 
-local function EnsureSpyAlertWindow()
-  if Notifier._spyAlertWindow then return Notifier._spyAlertWindow end
+local function EnsureSpyAlertGroup()
+  if Notifier._spyAlertGroup then return Notifier._spyAlertGroup end
 
-  local f = CreateFrame("Frame", "KillOnSight_SpyAlertWindow", UIParent, "BackdropTemplate")
-  f:ClearAllPoints()
-  f:SetPoint("TOP", UIParent, "TOP", 0, -215)
-  f:SetClampedToScreen(true)
-  f:SetSize(180, 42)
-  f:SetMovable(true)
-  f:EnableMouse(true)
-  f:RegisterForDrag("LeftButton")
-  f:SetScript("OnDragStart", function(self)
+  local group = CreateFrame("Frame", "KillOnSight_SpyAlertGroup", UIParent)
+  group:ClearAllPoints()
+  group:SetPoint("TOP", UIParent, "TOP", 0, -215)
+  group:SetClampedToScreen(true)
+  group:SetSize(180, 90)
+  group:SetMovable(true)
+  group:EnableMouse(true)
+  group:RegisterForDrag("LeftButton")
+  group:SetScript("OnDragStart", function(self)
     if IsSecureTargetLocked() then return end
+    self._alertGroupMoving = true
     self:StartMoving()
   end)
-  f:SetScript("OnDragStop", function(self)
+  group:SetScript("OnDragStop", function(self)
+    if not self._alertGroupMoving then return end
     self:StopMovingOrSizing()
+    self._alertGroupMoving = nil
     SaveSpyAlertPosition(self)
   end)
+  group:Hide()
+
+  Notifier._spyAlertGroup = group
+  ApplySpyAlertPosition(group)
+  return group
+end
+
+local function UpdateSpyAlertGroupSize()
+  local group = Notifier._spyAlertGroup
+  if not group then return end
+  local stealth = Notifier._stealthAlertWindow
+  local target = Notifier._targetAlertWindow
+  local width = math.max(
+    180,
+    (stealth and stealth.GetWidth and stealth:GetWidth()) or 0,
+    (target and target.GetWidth and target:GetWidth()) or 0
+  )
+  group:SetSize(width, 90)
+end
+
+local function UpdateSpyAlertGroupVisibility()
+  local group = Notifier._spyAlertGroup
+  if not group then return end
+  local stealth = Notifier._stealthAlertWindow
+  local target = Notifier._targetAlertWindow
+  if (stealth and stealth:IsShown()) or (target and target:IsShown()) then
+    group:Show()
+  else
+    group:Hide()
+  end
+end
+
+local function StartMovingSpyAlertGroup()
+  local group = Notifier._spyAlertGroup
+  if not group or IsSecureTargetLocked() then return end
+  group._alertGroupMoving = true
+  group:StartMoving()
+end
+
+local function StopMovingSpyAlertGroup()
+  local group = Notifier._spyAlertGroup
+  if not group or not group._alertGroupMoving then return end
+  group:StopMovingOrSizing()
+  group._alertGroupMoving = nil
+  SaveSpyAlertPosition(group)
+end
+
+local function EnsureSpyAlertWindow(kind)
+  kind = kind == "stealth" and "stealth" or "targeting"
+  local isStealth = kind == "stealth"
+  local field = isStealth and "_stealthAlertWindow" or "_targetAlertWindow"
+  if Notifier[field] then return Notifier[field] end
+
+  local group = EnsureSpyAlertGroup()
+  local frameName = isStealth and "KillOnSight_StealthAlertWindow" or "KillOnSight_TargetingAlertWindow"
+  local f = CreateFrame("Frame", frameName, group, "BackdropTemplate")
+  f:ClearAllPoints()
+  if isStealth then
+    f:SetPoint("TOPLEFT", group, "TOPLEFT", 0, 0)
+  else
+    f:SetPoint("TOPLEFT", group, "TOPLEFT", 0, -48)
+  end
+  f:SetSize(180, 42)
+  f:EnableMouse(true)
+  f:RegisterForDrag("LeftButton")
+  f:SetScript("OnDragStart", StartMovingSpyAlertGroup)
+  f:SetScript("OnDragStop", StopMovingSpyAlertGroup)
   f:Hide()
 
   f:SetBackdrop({
@@ -269,58 +342,55 @@ local function EnsureSpyAlertWindow()
   f.Icon:ClearAllPoints()
   f.Icon:SetPoint("TOPLEFT", f, "TOPLEFT", 6, -5)
   f.Icon:SetSize(32, 32)
-  f.Icon:SetBackdrop({ bgFile = "Interface\\Icons\\Ability_Stealth" })
-  f.Icon:SetBackdropColor(1, 1, 1, 0.5)
+  f.Icon:SetBackdrop({ bgFile = isStealth and "Interface\\Icons\\Ability_Stealth" or "Interface\\Icons\\Ability_Hunter_SniperShot" })
+  f.Icon:SetBackdropColor(1, 1, 1, isStealth and 0.5 or 1)
 
   f.Title = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   f.Title:SetPoint("TOPLEFT", f, "TOPLEFT", 42, -3)
   f.Title:SetHeight(12)
-  f.Title:SetText(L.STEALTH_DETECTED_TITLE)
-
+  f.Title:SetText(isStealth and L.STEALTH_DETECTED_TITLE or (L.TARGETING_YOU_TITLE or "Enemy targeting you!"))
 
   f.Name = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   f.Name:SetPoint("TOPLEFT", f, "TOPLEFT", 42, -15)
   f.Name:SetHeight(12)
 
-  -- Match Nearby rows: use a secure click macro to target the named player.
-  -- The macro itself stops during combat, when WoW blocks addon-driven targeting.
-  local targetButton = CreateFrame("Button", nil, f, "SecureActionButtonTemplate")
-  -- Protected buttons cannot anchor to a FontString region. Anchor to the
-  -- warning frame instead, matching the name line's bounds (x=42..width-10,
-  -- y=15..27 from the top). The frame width is updated when an alert is shown.
-  targetButton:SetPoint("TOPLEFT", f, "TOPLEFT", 42, -15)
-  targetButton:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 15)
-  targetButton:EnableMouse(true)
-  targetButton:RegisterForClicks("AnyDown", "AnyUp")
-  targetButton:SetAttribute("type1", "macro")
-  targetButton:SetAttribute("macrotext1", "/stopmacro")
-  targetButton:SetAttribute("macrotext", "/stopmacro")
-  targetButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-  targetButton:SetScript("OnEnter", function(self)
-    if not f._targetName or not GameTooltip then return end
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:AddLine(f._targetName, 1, 0.82, 0)
-    GameTooltip:AddLine(L.TARGETING_YOU_CLICK_HINT or "Click to target when out of combat.", 1, 1, 1, true)
-    if IsSecureTargetLocked() then
-      GameTooltip:AddLine(L.TARGETING_YOU_COMBAT_HINT or "Targeting is blocked during combat.", 1, 0.25, 0.25, true)
-    end
-    GameTooltip:Show()
-  end)
-  targetButton:SetScript("OnLeave", function()
-    if GameTooltip then GameTooltip:Hide() end
-  end)
-  f._targetButton = targetButton
-  f:HookScript("OnHide", function(self)
-    self._targetName = nil
-    self._targetGUID = nil
-    SetAlertTargetMacro(self, nil)
-  end)
+  if not isStealth then
+    -- Keep the secure click target anchored to its own frame, never to a text region.
+    local targetButton = CreateFrame("Button", nil, f, "SecureActionButtonTemplate")
+    targetButton:SetPoint("TOPLEFT", f, "TOPLEFT", 42, -15)
+    targetButton:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -10, 15)
+    targetButton:EnableMouse(true)
+    targetButton:RegisterForClicks("AnyDown", "AnyUp")
+    targetButton:SetAttribute("type1", "macro")
+    targetButton:SetAttribute("macrotext1", "/stopmacro")
+    targetButton:SetAttribute("macrotext", "/stopmacro")
+    targetButton:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    targetButton:SetScript("OnEnter", function(self)
+      if not f._targetName or not GameTooltip then return end
+      GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+      GameTooltip:AddLine(f._targetName, 1, 0.82, 0)
+      GameTooltip:AddLine(L.TARGETING_YOU_CLICK_HINT or "Click to target when out of combat.", 1, 1, 1, true)
+      if IsSecureTargetLocked() then
+        GameTooltip:AddLine(L.TARGETING_YOU_COMBAT_HINT or "Targeting is blocked during combat.", 1, 0.25, 0.25, true)
+      end
+      GameTooltip:Show()
+    end)
+    targetButton:SetScript("OnLeave", function()
+      if GameTooltip then GameTooltip:Hide() end
+    end)
+    f._targetButton = targetButton
+    f:HookScript("OnHide", function(self)
+      self._targetName = nil
+      self._targetGUID = nil
+      SetAlertTargetMacro(self, nil)
+    end)
+  end
 
   local dismissButton = CreateFrame("Button", nil, f, "UIPanelCloseButton")
   dismissButton:SetSize(18, 18)
   dismissButton:SetPoint("TOPRIGHT", f, "TOPRIGHT", -1, -1)
   dismissButton:SetScript("OnClick", function()
-    if Notifier.DismissSpyAlert then Notifier:DismissSpyAlert() end
+    if Notifier.DismissSpyAlert then Notifier:DismissSpyAlert(kind) end
   end)
   f._dismissButton = dismissButton
 
@@ -329,14 +399,15 @@ local function EnsureSpyAlertWindow()
   f.Location:SetHeight(12)
   f.Location:SetText("")
 
-  -- Visual styling (match Spy defaults)
-  local br, bg, bb, ba = 0.6, 0.2, 1.0, 0.4 -- Stealth Border
-  f:SetBackdropBorderColor(br, bg, bb, ba)
-  f.Title:SetTextColor(0.6, 0.2, 1.0, 1)     -- Stealth Text
-  f.Name:SetTextColor(1, 1, 1, 1)           -- Name Text
-  f.Location:SetTextColor(1, 0.82, 0, 1)    -- Location Text (unused for stealth)
+  local borderR, borderG, borderB = isStealth and 0.6 or 1, isStealth and 0.2 or 0.15, isStealth and 1 or 0.15
+  f:SetBackdropBorderColor(borderR, borderG, borderB, isStealth and 0.4 or 0.9)
+  f.Title:SetTextColor(isStealth and 0.6 or 1, isStealth and 0.2 or 0.2, isStealth and 1 or 0.2, 1)
+  f.Name:SetTextColor(1, 1, 1, 1)
+  f.Location:SetTextColor(1, 0.82, 0, 1)
 
-  Notifier._spyAlertWindow = f
+  Notifier[field] = f
+  if not isStealth then Notifier._spyAlertWindow = f end
+  UpdateSpyAlertGroupSize()
   return f
 end
 
@@ -381,8 +452,7 @@ local function CancelSpyAlertAnimation(f)
   if f and f.SetScript then f:SetScript("OnUpdate", nil) end
 end
 
-function Notifier:DismissSpyAlert()
-  local f = self._spyAlertWindow
+local function DismissSpyAlertFrame(f)
   if not f then return false end
   CancelSpyAlertAnimation(f)
   _FlashStopWindow(f)
@@ -392,20 +462,29 @@ function Notifier:DismissSpyAlert()
   return true
 end
 
+function Notifier:DismissSpyAlert(kind)
+  local changed = false
+  if not kind or kind == "stealth" then
+    changed = DismissSpyAlertFrame(self._stealthAlertWindow) or changed
+  end
+  if not kind or kind == "targeting" then
+    changed = DismissSpyAlertFrame(self._targetAlertWindow) or changed
+  end
+  UpdateSpyAlertGroupVisibility()
+  return changed
+end
+
 function Notifier:ClearTargetingAlert(guid)
-  local f = self._spyAlertWindow
+  local f = self._targetAlertWindow
   if not f or f._alertKind ~= "targeting" then return false end
   if guid and f._targetGUID ~= guid then return false end
-  return self:DismissSpyAlert()
+  return self:DismissSpyAlert("targeting")
 end
 
 function Notifier:ShowSpyStealthAlert(name, classFile)
-  local f = EnsureSpyAlertWindow()
+  local f = EnsureSpyAlertWindow("stealth")
   CancelSpyAlertAnimation(f)
   f._alertKind = "stealth"
-  f._targetName = nil
-  f._targetGUID = nil
-  SetAlertTargetMacro(f, nil)
 
   -- Title (localized)
   if f.Title and f.Title.SetText then
@@ -439,10 +518,12 @@ function Notifier:ShowSpyStealthAlert(name, classFile)
   f:SetWidth(w)
   if f.Name and f.Name.SetWidth then f.Name:SetWidth(f:GetWidth() - 52) end
   if f.Location and f.Location.SetWidth then f.Location:SetWidth(f:GetWidth() - 52) end
-  ApplySpyAlertPosition(f)
+  UpdateSpyAlertGroupSize()
 
   -- Show + animate (hold then fade)
+  EnsureSpyAlertGroup():Show()
   f:Show()
+  UpdateSpyAlertGroupVisibility()
   f:SetAlpha(1)
 
   local hold, fade = 6.0, 1.2
@@ -467,6 +548,7 @@ function Notifier:ShowSpyStealthAlert(name, classFile)
           self:SetScript("OnUpdate", nil)
           self:Hide()
           self:SetAlpha(1)
+          UpdateSpyAlertGroupVisibility()
           return
         end
         self:SetAlpha(1 - p)
@@ -478,8 +560,7 @@ function Notifier:ShowSpyStealthAlert(name, classFile)
 end
 
 function Notifier:ShowSpyTargetAlert(name, classFile, guid)
-  local f = EnsureSpyAlertWindow()
-  if f:IsShown() and f._alertKind == "stealth" then return end
+  local f = EnsureSpyAlertWindow("targeting")
   CancelSpyAlertAnimation(f)
   f._alertKind = "targeting"
   f._targetName = name
@@ -510,9 +591,11 @@ function Notifier:ShowSpyTargetAlert(name, classFile, guid)
   f:SetWidth(width)
   if f.Name and f.Name.SetWidth then f.Name:SetWidth(width - 52) end
   if f.Location and f.Location.SetWidth then f.Location:SetWidth(width - 52) end
-  ApplySpyAlertPosition(f)
+  UpdateSpyAlertGroupSize()
 
+  EnsureSpyAlertGroup():Show()
   f:Show()
+  UpdateSpyAlertGroupVisibility()
   f:SetAlpha(1)
   _FlashWindow(f)
 
@@ -528,21 +611,24 @@ function Notifier:ShowSpyTargetAlert(name, classFile, guid)
           self:SetScript("OnUpdate", nil)
           self:Hide()
           self:SetAlpha(1)
+          UpdateSpyAlertGroupVisibility()
           return
         end
         self:SetAlpha(1 - progress)
       end)
     end)
   end
+  return true, "shown"
 end
 
 -- Pre-create the secure button during addon load, before a possible combat lockdown.
-EnsureSpyAlertWindow()
+EnsureSpyAlertWindow("stealth")
+EnsureSpyAlertWindow("targeting")
 
 local targetButtonEventFrame = CreateFrame("Frame")
 targetButtonEventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 targetButtonEventFrame:SetScript("OnEvent", function()
-  local f = Notifier._spyAlertWindow
+  local f = Notifier._targetAlertWindow
   if not f or not f._targetButton then return end
   if f:IsShown() and f._alertKind == "targeting" then
     SetAlertTargetMacro(f, f._targetName)
@@ -598,23 +684,29 @@ end
 function Notifier:NotifyTargetingYou(name, classFile, guid)
   if IsDisabled() then
     RecordTrace("target_alert_inactive", { active = false })
-    return
+    return false, "inactive"
   end
   if SuppressInGoblinTown() then
     RecordTrace("target_alert_goblin_suppressed", { goblinFilter = true })
-    return
+    return false, "goblin_town"
   end
   local prof = DB:GetSettings()
   if prof.targetingAlertEnabled == false then
     RecordTrace("target_alert_disabled")
-    return
+    return false, "disabled"
   end
-  self:ShowSpyTargetAlert(name, classFile, guid)
+  local shown, status = self:ShowSpyTargetAlert(name, classFile, guid)
+  if shown ~= true then
+    status = status or "not_shown"
+    RecordTrace("target_alert_not_shown", { alertStatus = status })
+    return false, status
+  end
   RecordTrace("target_alert_window_requested")
   if prof.enableSound ~= false then
     local played = self:PlayBundledSound("detected-nearby.mp3")
     RecordTrace("target_alert_sound_requested", { sound = played and true or false })
   end
+  return true, "shown"
 end
 
 function Notifier:Flash()

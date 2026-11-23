@@ -2,7 +2,7 @@
 ## Title: Kanonfode – Kill on Sight (K-KoS) |cFFFFA500[Bug Tracer]|r
 ## Notes: Optional local diagnostic trace for K-KoS. No player names, GUIDs or chat are stored.
 ## Author: Kanonfode
-## Version: 0.2.0
+## Version: 0.2.1
 ## Category: Combat
 ## DefaultState: enabled
 ## IconTexture: Interface/AddOns/KoS-Kanonfode/icon.tga
