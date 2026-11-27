@@ -2042,7 +2042,7 @@ local factionLabel = "-"
   local version = versionInfo and type(versionInfo.GetInstalledVersion) == "function"
     and versionInfo.GetInstalledVersion(ADDON_NAME)
   if not version or version == "" then
-    version = versionInfo and versionInfo.CURRENT or "0.4.21"
+    version = versionInfo and versionInfo.CURRENT or "0.4.23"
   end
   tVersion:SetText((L.UI_VERSION or "Version") .. ": v" .. tostring(version))
 

@@ -1017,3 +1017,14 @@ This is a design limitation, not an addon bug.
 - Improved stealth detection handling
 - Performance optimizations and throttling improvements
 
+## Kanonfode – Kill on Sight (K-KoS) v0.4.23 — Stealth-varsling for alle rangene
+
+### Rettet
+- Oppdag alle fem rangene av Rogue Stealth, begge Vanish-rangene og aura-ID-ene deres, samt alle tre Druid Prowl-rangene.
+- Gjenopprett aura-baserte Skjult-varsler når fiendespillere bruker høyere rang av Stealth, Vanish eller Prowl.
+- Behold varsling for Night Elf-rasialen Shadowmeld og eksisterende varseloppførsel.
+
+### Beholdt
+- Ingen endringer i databasen, SavedVariables, Guild Sync eller varslingsvinduene.
+- Ikke testet live i spillet.
+
